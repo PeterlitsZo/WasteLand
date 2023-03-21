@@ -5,12 +5,12 @@ use waste_island::Database;
 fn benchmark(c: &mut Criterion) {
     c.bench_function("benchmark", |b| {
         b.iter(|| {
-            let database = Database::create("/tmp/waste_island.benchmark/")
+            let database = Database::create("/tmp/waste_island.benchmark")
                 .unwrap();
             for i in 0..1024 {
                 let content = format!("{} {}", i, "just for test".repeat(1024));
                 let hash = database.put(content.as_bytes()).unwrap();
-                for i in 0..99 {
+                for _ in 0..99 {
                     database.get(&hash).unwrap();
                 }
             }

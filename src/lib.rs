@@ -1,9 +1,8 @@
-use std::fs::{self, File};
-use std::str;
+use std::{fs, str, path::{Path, PathBuf}};
 use sha256::digest;
 
 pub struct Database {
-    database_name: String,
+    database_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -12,28 +11,41 @@ pub struct Error {
 }
 
 impl Database {
-    fn gen_waste_name(data: &[u8]) -> String {
+    fn gen_waste_hash(data: &[u8]) -> String {
         return digest(data)
     }
 
-    pub fn create(database_name: &str) -> Result<Database, Error> {
-        match fs::create_dir_all(format!("{}/waste", database_name)) {
+    fn waste_path(&self) -> PathBuf {
+        self.database_path.join("waste")
+    }
+
+    fn version_path(&self) -> PathBuf {
+        self.database_path.join("version")
+    }
+
+    pub fn create(database_path: &str) -> Result<Database, Error> {
+        let database = Database{ database_path: PathBuf::from(database_path) };
+
+        match fs::create_dir_all(database.waste_path()) {
             Ok(_) => (),
             Err(e) => {
                 return Err(Error {
-                    message: format!("create database directory {}: {}", database_name, e),
+                    message: format!(
+                        "create database directory {}: {}",
+                        database.waste_path().display(), e
+                    ),
                 })
             }
         }
 
-        match fs::write(format!("{}/version", database_name), b"0") {
+        match fs::write(database.version_path(), b"0") {
             Ok(_) => (),
-            Err(e) => return Err(Error { message: format!("create version file: {}", e.to_string()) })
+            Err(e) => return Err(Error {
+                message: format!("create version file: {}", e.to_string())
+            })
         }
 
-        Ok(Database {
-            database_name: String::from(database_name),
-        })
+        Ok(database)
     }
 
     pub fn open(database_name: &str) -> Result<Database, Error> {
@@ -47,21 +59,21 @@ impl Database {
         }
 
         Ok(Database {
-            database_name: String::from(database_name),
+            database_path: PathBuf::from(database_name),
         })
     }
 
     pub fn put(&self, data: &[u8]) -> Result<String, Error> {
-        let waste_name = Self::gen_waste_name(data);
-        let waste_path = format!("{}waste/{}", self.database_name, waste_name);
+        let hash = Self::gen_waste_hash(data);
+        let waste_path = self.waste_path().join(&hash);
         match fs::write(waste_path, data) {
-            Ok(_) => Ok(waste_name),
+            Ok(_) => Ok(hash),
             Err(e) => Err(Error{ message: format!("write to file: {}", e) })
         }
     }
 
     pub fn get(&self, hash: &str) -> Result<Vec<u8>, Error> {
-        let waste_path = format!("{}waste/{}", self.database_name, hash);
+        let waste_path = self.waste_path().join(hash);
         match fs::read(waste_path) {
             Ok(data) => Ok(data),
             Err(e) => Err(Error{ message: format!("read from file: {}", e) })
@@ -69,10 +81,13 @@ impl Database {
     }
 
     pub fn drop(self) -> Result<(), Error> {
-        match fs::remove_dir_all(&self.database_name) {
+        match fs::remove_dir_all(&self.database_path) {
             Ok(()) => Ok(()),
             Err(e) => Err(Error {
-                message: format!("remove directory {}: {}", &self.database_name, e),
+                message: format!(
+                    "remove directory {}: {}",
+                    &self.database_path.display(), e
+                ),
             }),
         }
     }

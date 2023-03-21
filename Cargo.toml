@@ -1,5 +1,5 @@
 [package]
-name = "WasteLand"
+name = "waste_island"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,3 +7,10 @@ edition = "2021"
 
 [dependencies]
 sha256 = "1.1.2"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "my_benchmark"
+harness = false

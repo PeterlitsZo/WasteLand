@@ -1,8 +1,8 @@
 use sha256::digest;
 use std::{
     collections::HashMap,
-    fs::{self, File},
-    io::{Read, Seek, SeekFrom, Write},
+    fs,
+    io::{Read, Seek, SeekFrom, Write, ErrorKind},
     path::PathBuf,
     str,
 };
@@ -56,16 +56,8 @@ impl Database {
         digest(data)
     }
 
-    fn waste_path(&self) -> PathBuf {
-        self.path.join("waste")
-    }
-
     fn version_path(&self) -> PathBuf {
         self.path.join("version")
-    }
-
-    fn data_path(&self) -> PathBuf {
-        self.path.join("data")
     }
 
     fn open_data(database_path: &PathBuf) -> Result<fs::File, Error> {
@@ -107,7 +99,7 @@ impl Database {
         let database_path = PathBuf::from(database_path);
         let data = Self::open_data(&database_path)?;
 
-        let database = Database {
+        let mut database = Database {
             path: database_path,
             data: data,
             offset: HashMap::new(),
@@ -120,6 +112,33 @@ impl Database {
                 "unexcepted version {}",
                 String::from_utf8_lossy(&version_data)
             )));
+        }
+
+        loop {
+            let offset = try_or_return_error!(
+                database.data.stream_position(),
+                "read data to build offset hashmap: get offset"
+            );
+
+            let mut size = [0u8; 8];
+            match database.data.read_exact(&mut size) {
+                Ok(_) => (),
+                Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
+                Err(e) => {
+                    return Err(Error::new(&format!("read data to build offset hashmap: get size: {e}")))
+                }
+            }
+            let size = u8_array_to_usize(size);
+
+            let mut content = vec![0u8; size];
+            try_or_return_error!(
+                database.data.read_exact(&mut content),
+                "read data to build offset hashmap: read size"
+            );
+
+            let hash = Self::gen_waste_hash(&content);
+
+            database.offset.insert(hash, offset);
         }
 
         Ok(database)
@@ -171,10 +190,10 @@ impl Database {
 mod tests {
     use super::*;
 
-    fn clean_up(database_name: &str) {
+    fn clean_up(database_path: &str) {
         use std::io::ErrorKind;
 
-        match fs::remove_dir_all(database_name) {
+        match fs::remove_dir_all(database_path) {
             Err(e) if e.kind() != ErrorKind::NotFound => {
                 panic!("{}", e)
             }
@@ -183,16 +202,30 @@ mod tests {
     }
 
     #[test]
-    fn main() {
-        let database_name = "/tmp/waste-land.skogatt.org/";
-        clean_up(database_name);
+    fn it_works() {
+        let database_path = "/tmp/waste-land.skogatt.org/it-works";
+        clean_up(database_path);
 
-        assert!(Database::open(database_name).is_err());
-        Database::create(database_name).unwrap();
-        let mut database = Database::open(database_name).unwrap();
+        assert!(Database::open(database_path).is_err());
+        Database::create(database_path).unwrap();
+        let mut database = Database::open(database_path).unwrap();
         let waste_hash = database.put(b"hello world").unwrap();
         let waste2_hash = database.put(b"hello world again").unwrap();
         assert_eq!(database.get(&waste_hash).unwrap(), b"hello world");
         assert_eq!(database.get(&waste2_hash).unwrap(), b"hello world again");
+    }
+
+    #[test]
+    fn it_works_even_after_reopen() {
+        let database_path = "/tmp/waste-land.skogatt.org/it-works-even-after-reopen";
+        clean_up(database_path);
+
+        let mut database = Database::create(database_path).unwrap();
+        let hash1 = database.put(b"this is a content number 1.").unwrap();
+        let hash2 = database.put(b"this is a content number 2.").unwrap();
+
+        let mut database = Database::open(database_path).unwrap();
+        assert_eq!(database.get(&hash1).unwrap(), b"this is a content number 1.");
+        assert_eq!(database.get(&hash2).unwrap(), b"this is a content number 2.");
     }
 }

@@ -52,12 +52,10 @@ fn u8_array_to_usize(bytes: [u8; 8]) -> usize {
 }
 
 impl Database {
+    const VERSION: [u8; 1] = [0u8];
+
     fn gen_waste_hash(data: &[u8]) -> String {
         digest(data)
-    }
-
-    fn version_path(&self) -> PathBuf {
-        self.path.join("version")
     }
 
     fn open_data(database_path: &PathBuf) -> Result<fs::File, Error> {
@@ -72,47 +70,56 @@ impl Database {
         Ok(file)
     }
 
+    fn version_path(database_path: &PathBuf) -> PathBuf {
+        database_path.join("version")
+    }
+
+    fn check_version(database_path: &PathBuf) -> Result<(), Error> {
+        let mut file = try_or_return_error!(
+            fs::File::open(Self::version_path(database_path)),
+            "open version by read-only mode"
+        );
+        let mut version = [0u8; 1];
+        try_or_return_error!(file.read(&mut version), "read version");
+        if version != Self::VERSION {
+            return Err(Error::new("unsupported version"));
+        }
+        Ok(())
+    }
+
+    fn create_version(database_path: &PathBuf) -> Result<(), Error> {
+        try_or_return_error!(
+            fs::write(Self::version_path(database_path), Self::VERSION),
+            "create version and write"
+        );
+        Ok(())
+    }
+
     pub fn create(database_path: &str) -> Result<Database, Error> {
         let database_path = PathBuf::from(database_path);
         try_or_return_error!(
             fs::create_dir_all(&database_path),
             format!("create database directory {:?}", database_path)
         );
+        Self::create_version(&database_path)?;
 
-        let data = Self::open_data(&database_path)?;
-
-        let database = Database {
+        Ok(Database {
+            data: Self::open_data(&database_path)?,
             path: database_path,
-            data: data,
             offset: HashMap::new(),
-        };
-
-        try_or_return_error!(
-            fs::write(database.version_path(), b"0"),
-            "create version file"
-        );
-
-        Ok(database)
+        })
     }
 
     pub fn open(database_path: &str) -> Result<Database, Error> {
         let database_path = PathBuf::from(database_path);
         let data = Self::open_data(&database_path)?;
+        Self::check_version(&database_path)?;
 
         let mut database = Database {
             path: database_path,
             data: data,
             offset: HashMap::new(),
         };
-
-        let version_data =
-            try_or_return_error!(fs::read(database.version_path()), "read version file");
-        if version_data != b"0" {
-            return Err(Error::new(&format!(
-                "unexcepted version {}",
-                String::from_utf8_lossy(&version_data)
-            )));
-        }
 
         loop {
             let offset = try_or_return_error!(

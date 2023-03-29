@@ -54,7 +54,7 @@ fn u8_array_to_usize(bytes: [u8; 8]) -> usize {
 impl Database {
     const VERSION: [u8; 1] = [0u8];
 
-    fn gen_waste_hash(data: &[u8]) -> String {
+    pub fn gen_waste_hash(data: &[u8]) -> String {
         digest(data)
     }
 
@@ -97,6 +97,10 @@ impl Database {
 
     pub fn create(database_path: &str) -> Result<Database, Error> {
         let database_path = PathBuf::from(database_path);
+        if database_path.exists() {
+            return Err(Error::new("looks like there is already a database here"))
+        }
+
         try_or_return_error!(
             fs::create_dir_all(&database_path),
             format!("create database directory {:?}", database_path)

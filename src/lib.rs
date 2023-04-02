@@ -2,13 +2,18 @@ use sha256::digest;
 use std::{
     collections::HashMap,
     fs,
-    io::{Read, Seek, SeekFrom, Write, ErrorKind},
-    path::PathBuf,
+    io::{ErrorKind, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
     str,
 };
 
 pub struct Database {
     path: PathBuf,
+    data: fs::File,
+    index: Indexer,
+}
+
+pub struct Indexer {
     data: fs::File,
     offset: HashMap<String, u64>,
 }
@@ -35,7 +40,10 @@ macro_rules! try_or_return_error {
     };
 }
 
-fn usize_to_u8_array(n: usize) -> [u8; 8] {
+const HASH_LENGTH: i32 = 32;
+const OFFSET_LENGTH: i32 = 8;
+
+fn offset_usize_to_bytes(n: usize) -> [u8; OFFSET_LENGTH as usize] {
     let mut bytes = [0u8; 8];
     for i in 0..8 {
         bytes[i] = (n >> (i * 8)) as u8;
@@ -43,12 +51,118 @@ fn usize_to_u8_array(n: usize) -> [u8; 8] {
     bytes
 }
 
-fn u8_array_to_usize(bytes: [u8; 8]) -> usize {
+fn offset_bytes_to_usize(bytes: [u8; OFFSET_LENGTH as usize]) -> usize {
     let mut n = 0usize;
     for i in 0..8 {
         n |= (bytes[i] as usize) << (i * 8);
     }
     n
+}
+
+fn hash_bytes_to_string(bytes: &[u8; HASH_LENGTH as usize]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect::<String>()
+}
+
+fn hash_string_to_bytes(s: &str) -> [u8; HASH_LENGTH as usize] {
+    let mut result = [0u8; HASH_LENGTH as usize];
+    for i in 0..(HASH_LENGTH as usize) {
+        let byte = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap();
+        result[i] = byte;
+    }
+    result
+}
+
+impl Indexer {
+    fn open_or_create_rw_data(root_path: &PathBuf) -> Result<fs::File, Error> {
+        let file = try_or_return_error!(
+            fs::File::options()
+                .write(true)
+                .read(true)
+                .create(true)
+                .open(root_path.join("index")),
+            "open or create index data file in read-write mode"
+        );
+        Ok(file)
+    }
+
+    /// Create a new `Indexer` by path, it will:
+    ///
+    ///   - Create a new index data file in the path.
+    ///   - Return `Indexer` itself.
+    ///
+    /// If there is already a index data file, use method `open` rather than
+    /// me.
+    pub fn create(path: &PathBuf) -> Result<Self, Error> {
+        let data = Self::open_or_create_rw_data(path)?;
+
+        Ok(Self {
+            data: data,
+            offset: HashMap::new(),
+        })
+    }
+
+    pub fn open(path: &PathBuf) -> Result<Self, Error> {
+        let data = Self::open_or_create_rw_data(path)?;
+        let mut result = Self {
+            data: data,
+            offset: HashMap::new(),
+        };
+
+        loop {
+            let mut hash = [0u8; HASH_LENGTH as usize];
+            match result.data.read_exact(&mut hash) {
+                Ok(_) => (),
+                Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
+                Err(e) => {
+                    return Err(Error::new(&format!(
+                        "read data to build offset hashmap: get size: {e}"
+                    )))
+                }
+            }
+            let hash = hash_bytes_to_string(&hash);
+
+            let mut offset = [0u8; OFFSET_LENGTH as usize];
+            match result.data.read_exact(&mut offset) {
+                Ok(_) => (),
+                Err(e) => {
+                    return Err(Error::new(&format!(
+                        "read data to build offset hashmap: get size: {e}"
+                    )))
+                }
+            }
+            let offset = offset_bytes_to_usize(offset);
+
+            result.offset.insert(hash, offset as u64);
+        }
+
+        Ok(result)
+    }
+
+    fn put(&mut self, hash: &str, offset: u64) -> Result<(), Error> {
+        self.offset.insert(hash.to_string(), offset);
+
+        let mut record = [0u8; (HASH_LENGTH + OFFSET_LENGTH) as usize];
+        let hash = hash_string_to_bytes(hash);
+        let offset = offset_usize_to_bytes(offset as usize);
+        for i in 0..(HASH_LENGTH as usize) {
+            record[i] = hash[i];
+        }
+        for i in 0..(OFFSET_LENGTH as usize) {
+            record[HASH_LENGTH as usize + i] = offset[i];
+        }
+
+        try_or_return_error!(self.data.write(&record), "write new record");
+
+        Ok(())
+    }
+
+    fn get(&self, hash: &str) -> Option<&u64> {
+        let result = self.offset.get(hash);
+        result
+    }
 }
 
 impl Database {
@@ -95,10 +209,13 @@ impl Database {
         Ok(())
     }
 
-    pub fn create(database_path: &str) -> Result<Database, Error> {
-        let database_path = PathBuf::from(database_path);
+    pub fn create<P>(database_path: P) -> Result<Database, Error>
+    where
+        P: AsRef<Path>,
+    {
+        let database_path = PathBuf::from(database_path.as_ref());
         if database_path.exists() {
-            return Err(Error::new("looks like there is already a database here"))
+            return Err(Error::new("looks like there is already a database here"));
         }
 
         try_or_return_error!(
@@ -109,48 +226,24 @@ impl Database {
 
         Ok(Database {
             data: Self::open_data(&database_path)?,
+            index: Indexer::create(&database_path)?,
             path: database_path,
-            offset: HashMap::new(),
         })
     }
 
-    pub fn open(database_path: &str) -> Result<Database, Error> {
-        let database_path = PathBuf::from(database_path);
+    pub fn open<P>(database_path: P) -> Result<Database, Error>
+    where
+        P: AsRef<Path>,
+    {
+        let database_path = PathBuf::from(database_path.as_ref());
         let data = Self::open_data(&database_path)?;
         Self::check_version(&database_path)?;
 
-        let mut database = Database {
+        let database = Database {
+            index: Indexer::open(&database_path)?,
             path: database_path,
             data: data,
-            offset: HashMap::new(),
         };
-
-        loop {
-            let offset = try_or_return_error!(
-                database.data.stream_position(),
-                "read data to build offset hashmap: get offset"
-            );
-
-            let mut size = [0u8; 8];
-            match database.data.read_exact(&mut size) {
-                Ok(_) => (),
-                Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
-                Err(e) => {
-                    return Err(Error::new(&format!("read data to build offset hashmap: get size: {e}")))
-                }
-            }
-            let size = u8_array_to_usize(size);
-
-            let mut content = vec![0u8; size];
-            try_or_return_error!(
-                database.data.read_exact(&mut content),
-                "read data to build offset hashmap: read size"
-            );
-
-            let hash = Self::gen_waste_hash(&content);
-
-            database.offset.insert(hash, offset);
-        }
 
         Ok(database)
     }
@@ -160,18 +253,18 @@ impl Database {
 
         let offset = try_or_return_error!(self.data.stream_position(), "get waste's offset");
         try_or_return_error!(
-            self.data.write(&usize_to_u8_array(data.len())),
+            self.data.write(&offset_usize_to_bytes(data.len())),
             "write waste's length"
         );
         try_or_return_error!(self.data.write_all(data), "write waste's data");
 
-        self.offset.insert(hash.clone(), offset);
+        self.index.put(&hash, offset)?;
 
         Ok(hash)
     }
 
     pub fn get(&mut self, hash: &str) -> Result<Vec<u8>, Error> {
-        let offset = self.offset.get(hash);
+        let offset = self.index.get(hash);
         let offset = match offset {
             None => return Err(Error::new("not found")),
             Some(o) => o,
@@ -181,7 +274,7 @@ impl Database {
 
         let mut size = [0u8; 8];
         try_or_return_error!(self.data.read_exact(&mut size), "read size");
-        let size = u8_array_to_usize(size);
+        let size = offset_bytes_to_usize(size);
 
         let mut content = vec![0u8; size];
         try_or_return_error!(self.data.read_exact(&mut content), "read waste");
@@ -202,8 +295,6 @@ mod tests {
     use super::*;
 
     fn clean_up(database_path: &str) {
-        use std::io::ErrorKind;
-
         match fs::remove_dir_all(database_path) {
             Err(e) if e.kind() != ErrorKind::NotFound => {
                 panic!("{}", e)
@@ -236,7 +327,13 @@ mod tests {
         let hash2 = database.put(b"this is a content number 2.").unwrap();
 
         let mut database = Database::open(database_path).unwrap();
-        assert_eq!(database.get(&hash1).unwrap(), b"this is a content number 1.");
-        assert_eq!(database.get(&hash2).unwrap(), b"this is a content number 2.");
+        assert_eq!(
+            database.get(&hash1).unwrap(),
+            b"this is a content number 1."
+        );
+        assert_eq!(
+            database.get(&hash2).unwrap(),
+            b"this is a content number 2."
+        );
     }
 }

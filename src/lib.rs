@@ -1,168 +1,25 @@
+mod indexer;
+mod error;
+mod utils;
+
 use sha256::digest;
 use std::{
-    collections::HashMap,
     fs,
-    io::{ErrorKind, Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     str,
 };
+
+use indexer::Indexer;
+use error::Error;
+use utils::{HASH_LENGTH, OFFSET_LENGTH};
+
+use crate::utils::{offset_usize_to_bytes, offset_bytes_to_usize};
 
 pub struct Database {
     path: PathBuf,
     data: fs::File,
     index: Indexer,
-}
-
-pub struct Indexer {
-    data: fs::File,
-    offset: HashMap<String, u64>,
-}
-
-#[derive(Debug)]
-pub struct Error {
-    message: String,
-}
-
-impl Error {
-    fn new(message: &str) -> Self {
-        Error {
-            message: message.to_string(),
-        }
-    }
-}
-
-macro_rules! try_or_return_error {
-    ($result:expr, $message_prefix:expr) => {
-        match $result {
-            Ok(r) => r,
-            Err(e) => return Err(Error::new(&format!("{}: {}", $message_prefix, e))),
-        }
-    };
-}
-
-const HASH_LENGTH: i32 = 32;
-const OFFSET_LENGTH: i32 = 8;
-
-fn offset_usize_to_bytes(n: usize) -> [u8; OFFSET_LENGTH as usize] {
-    let mut bytes = [0u8; 8];
-    for i in 0..8 {
-        bytes[i] = (n >> (i * 8)) as u8;
-    }
-    bytes
-}
-
-fn offset_bytes_to_usize(bytes: [u8; OFFSET_LENGTH as usize]) -> usize {
-    let mut n = 0usize;
-    for i in 0..8 {
-        n |= (bytes[i] as usize) << (i * 8);
-    }
-    n
-}
-
-fn hash_bytes_to_string(bytes: &[u8; HASH_LENGTH as usize]) -> String {
-    bytes
-        .iter()
-        .map(|byte| format!("{:02x}", byte))
-        .collect::<String>()
-}
-
-fn hash_string_to_bytes(s: &str) -> [u8; HASH_LENGTH as usize] {
-    let mut result = [0u8; HASH_LENGTH as usize];
-    for i in 0..(HASH_LENGTH as usize) {
-        let byte = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap();
-        result[i] = byte;
-    }
-    result
-}
-
-impl Indexer {
-    fn open_or_create_rw_data(root_path: &PathBuf) -> Result<fs::File, Error> {
-        let file = try_or_return_error!(
-            fs::File::options()
-                .write(true)
-                .read(true)
-                .create(true)
-                .open(root_path.join("index")),
-            "open or create index data file in read-write mode"
-        );
-        Ok(file)
-    }
-
-    /// Create a new `Indexer` by path, it will:
-    ///
-    ///   - Create a new index data file in the path.
-    ///   - Return `Indexer` itself.
-    ///
-    /// If there is already a index data file, use method `open` rather than
-    /// me.
-    pub fn create(path: &PathBuf) -> Result<Self, Error> {
-        let data = Self::open_or_create_rw_data(path)?;
-
-        Ok(Self {
-            data: data,
-            offset: HashMap::new(),
-        })
-    }
-
-    pub fn open(path: &PathBuf) -> Result<Self, Error> {
-        let data = Self::open_or_create_rw_data(path)?;
-        let mut result = Self {
-            data: data,
-            offset: HashMap::new(),
-        };
-
-        loop {
-            let mut hash = [0u8; HASH_LENGTH as usize];
-            match result.data.read_exact(&mut hash) {
-                Ok(_) => (),
-                Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
-                Err(e) => {
-                    return Err(Error::new(&format!(
-                        "read data to build offset hashmap: get size: {e}"
-                    )))
-                }
-            }
-            let hash = hash_bytes_to_string(&hash);
-
-            let mut offset = [0u8; OFFSET_LENGTH as usize];
-            match result.data.read_exact(&mut offset) {
-                Ok(_) => (),
-                Err(e) => {
-                    return Err(Error::new(&format!(
-                        "read data to build offset hashmap: get size: {e}"
-                    )))
-                }
-            }
-            let offset = offset_bytes_to_usize(offset);
-
-            result.offset.insert(hash, offset as u64);
-        }
-
-        Ok(result)
-    }
-
-    fn put(&mut self, hash: &str, offset: u64) -> Result<(), Error> {
-        self.offset.insert(hash.to_string(), offset);
-
-        let mut record = [0u8; (HASH_LENGTH + OFFSET_LENGTH) as usize];
-        let hash = hash_string_to_bytes(hash);
-        let offset = offset_usize_to_bytes(offset as usize);
-        for i in 0..(HASH_LENGTH as usize) {
-            record[i] = hash[i];
-        }
-        for i in 0..(OFFSET_LENGTH as usize) {
-            record[HASH_LENGTH as usize + i] = offset[i];
-        }
-
-        try_or_return_error!(self.data.write(&record), "write new record");
-
-        Ok(())
-    }
-
-    fn get(&self, hash: &str) -> Option<&u64> {
-        let result = self.offset.get(hash);
-        result
-    }
 }
 
 impl Database {
@@ -292,6 +149,8 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
+    use std::io::ErrorKind;
+
     use super::*;
 
     fn clean_up(database_path: &str) {

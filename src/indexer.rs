@@ -1,10 +1,15 @@
 use std::io::{ErrorKind, Write};
 use std::{fs::File, collections::HashMap, path::PathBuf, io::Read};
 
-use crate::error::Error;
-use crate::utils::{offset_bytes_to_usize, offset_usize_to_bytes, hash_bytes_to_string, hash_string_to_bytes};
-use crate::try_or_return_error;
-use crate::{HASH_LENGTH, OFFSET_LENGTH};
+use crate::error::{Error, ToInnerResult};
+use crate::utils::{
+    offset_bytes_to_usize,
+    offset_usize_to_bytes,
+    hash_bytes_to_string,
+    hash_string_to_bytes,
+    HASH_LENGTH,
+    OFFSET_LENGTH,
+};
 
 pub struct Indexer {
     data: File,
@@ -12,15 +17,13 @@ pub struct Indexer {
 }
 
 impl Indexer {
-    fn open_or_create_rw_data(root_path: &PathBuf) -> Result<File, Error> {
-        let file = try_or_return_error!(
-            File::options()
-                .write(true)
-                .read(true)
-                .create(true)
-                .open(root_path.join("index")),
-            "open or create index data file in read-write mode"
-        );
+    fn open_or_create_rw_index_data_file(root_path: &PathBuf) -> Result<File, Error> {
+        let file = File::options()
+            .write(true)
+            .read(true)
+            .create(true)
+            .open(root_path.join("index"))
+            .to_inner_result("open or create index data file in read-write mode")?;
         Ok(file)
     }
 
@@ -32,7 +35,7 @@ impl Indexer {
     /// If there is already a index data file, use method `open` rather than
     /// me.
     pub fn create(path: &PathBuf) -> Result<Self, Error> {
-        let data = Self::open_or_create_rw_data(path)?;
+        let data = Self::open_or_create_rw_index_data_file(path)?;
 
         Ok(Self {
             data: data,
@@ -40,8 +43,9 @@ impl Indexer {
         })
     }
 
+    /// Open a `Index` by path from a existing index data file.
     pub fn open(path: &PathBuf) -> Result<Self, Error> {
-        let data = Self::open_or_create_rw_data(path)?;
+        let data = Self::open_or_create_rw_index_data_file(path)?;
         let mut result = Self {
             data: data,
             offset: HashMap::new(),
@@ -60,7 +64,7 @@ impl Indexer {
             }
             let hash = hash_bytes_to_string(&hash);
 
-            let mut offset = [0u8; OFFSET_LENGTH as usize];
+            let mut offset = [0u8; OFFSET_LENGTH];
             match result.data.read_exact(&mut offset) {
                 Ok(_) => (),
                 Err(e) => {
@@ -77,6 +81,9 @@ impl Indexer {
         Ok(result)
     }
 
+    /// Put a new record: a mapping from hash to the offset in data file.
+    /// 
+    /// See method `get` as well.
     pub fn put(&mut self, hash: &str, offset: u64) -> Result<(), Error> {
         self.offset.insert(hash.to_string(), offset);
 
@@ -90,13 +97,14 @@ impl Indexer {
             record[HASH_LENGTH + i] = offset[i];
         }
 
-        try_or_return_error!(self.data.write(&record), "write new record");
+        self.data.write(&record).to_inner_result("write new record")?;
 
         Ok(())
     }
 
-    pub fn get(&self, hash: &str) -> Option<&u64> {
-        let result = self.offset.get(hash);
-        result
+    /// Get the offset in the data file by the hash.
+    pub fn get(&self, hash: &str) -> Option<u64> {
+        let result = self.offset.get(hash)?;
+        Some(*result)
     }
 }

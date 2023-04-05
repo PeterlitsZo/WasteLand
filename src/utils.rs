@@ -1,13 +1,3 @@
-#[macro_export]
-macro_rules! try_or_return_error {
-    ($result:expr, $message_prefix:expr) => {
-        match $result {
-            Ok(r) => r,
-            Err(e) => return Err(Error::new(&format!("{}: {}", $message_prefix, e))),
-        }
-    };
-}
-
 pub const HASH_LENGTH: usize = 32;
 pub const OFFSET_LENGTH: usize = 8;
 

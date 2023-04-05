@@ -11,8 +11,7 @@ use std::{
 };
 
 use indexer::Indexer;
-use error::Error;
-use utils::{HASH_LENGTH, OFFSET_LENGTH};
+use error::{Error, ToInnerResult};
 
 use crate::utils::{offset_usize_to_bytes, offset_bytes_to_usize};
 
@@ -25,19 +24,18 @@ pub struct Database {
 impl Database {
     const VERSION: [u8; 1] = [0u8];
 
+    /// Gen the waste hash from the content of data.
     pub fn gen_waste_hash(data: &[u8]) -> String {
         digest(data)
     }
 
     fn open_data(database_path: &PathBuf) -> Result<fs::File, Error> {
-        let file = try_or_return_error!(
-            fs::File::options()
-                .write(true)
-                .read(true)
-                .create(true)
-                .open(database_path.join("data")),
-            "open data file in write-read mode"
-        );
+        let file = fs::File::options()
+            .write(true)
+            .read(true)
+            .create(true)
+            .open(database_path.join("data"))
+            .to_inner_result("open data file in write-read mode")?;
         Ok(file)
     }
 
@@ -46,12 +44,10 @@ impl Database {
     }
 
     fn check_version(database_path: &PathBuf) -> Result<(), Error> {
-        let mut file = try_or_return_error!(
-            fs::File::open(Self::version_path(database_path)),
-            "open version by read-only mode"
-        );
+        let mut file = fs::File::open(Self::version_path(database_path))
+            .to_inner_result("open version by read-only mode")?;
         let mut version = [0u8; 1];
-        try_or_return_error!(file.read(&mut version), "read version");
+        file.read(&mut version).to_inner_result("read version")?;
         if version != Self::VERSION {
             return Err(Error::new("unsupported version"));
         }
@@ -59,26 +55,27 @@ impl Database {
     }
 
     fn create_version(database_path: &PathBuf) -> Result<(), Error> {
-        try_or_return_error!(
-            fs::write(Self::version_path(database_path), Self::VERSION),
-            "create version and write"
-        );
+        fs::write(Self::version_path(database_path), Self::VERSION)
+            .to_inner_result("create version and write")?;
         Ok(())
     }
 
+    /// Create a new database at the given path.
+    /// 
+    /// An error will be raised if the path is not an empty folder, as
+    /// attemping to create a new database in a non-empty folder may mess the
+    /// folder up.
     pub fn create<P>(database_path: P) -> Result<Database, Error>
     where
         P: AsRef<Path>,
     {
         let database_path = PathBuf::from(database_path.as_ref());
         if database_path.exists() {
-            return Err(Error::new("looks like there is already a database here"));
+            return Err(Error::new("The given path if not a empty folder"));
         }
 
-        try_or_return_error!(
-            fs::create_dir_all(&database_path),
-            format!("create database directory {:?}", database_path)
-        );
+        fs::create_dir_all(&database_path)
+            .to_inner_result(&format!("create database directory {:?}", database_path))?;
         Self::create_version(&database_path)?;
 
         Ok(Database {
@@ -108,12 +105,10 @@ impl Database {
     pub fn put(&mut self, data: &[u8]) -> Result<String, Error> {
         let hash = Self::gen_waste_hash(data);
 
-        let offset = try_or_return_error!(self.data.stream_position(), "get waste's offset");
-        try_or_return_error!(
-            self.data.write(&offset_usize_to_bytes(data.len())),
-            "write waste's length"
-        );
-        try_or_return_error!(self.data.write_all(data), "write waste's data");
+        let offset = self.data.stream_position().to_inner_result("get waste's offset")?;
+        self.data.write(&offset_usize_to_bytes(data.len()))
+            .to_inner_result("write waste's length")?;
+        self.data.write_all(data).to_inner_result("write waste's data")?;
 
         self.index.put(&hash, offset)?;
 
@@ -127,22 +122,21 @@ impl Database {
             Some(o) => o,
         };
 
-        try_or_return_error!(self.data.seek(SeekFrom::Start(*offset)), "set offset");
+        self.data.seek(SeekFrom::Start(offset))
+            .to_inner_result("set offset")?;
 
         let mut size = [0u8; 8];
-        try_or_return_error!(self.data.read_exact(&mut size), "read size");
+        self.data.read_exact(&mut size).to_inner_result("read size")?;
         let size = offset_bytes_to_usize(size);
 
         let mut content = vec![0u8; size];
-        try_or_return_error!(self.data.read_exact(&mut content), "read waste");
+        self.data.read_exact(&mut content).to_inner_result("read waste")?;
         Ok(content)
     }
 
     pub fn drop(self) -> Result<(), Error> {
-        try_or_return_error!(
-            fs::remove_dir_all(&self.path),
-            format!("remove directory {}", &self.path.display())
-        );
+        fs::remove_dir_all(&self.path)
+            .to_inner_result(&format!("remove directory {}", &self.path.display()))?;
         Ok(())
     }
 }

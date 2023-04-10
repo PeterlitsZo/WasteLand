@@ -16,7 +16,7 @@ impl PictureCache {
         fs::create_dir_all(&picture_cache_path).unwrap();
 
         let mut data_pathes = vec![];
-        for i in 0..128 {
+        for i in 0..64 {
             let pic_path = picture_cache_path.join(format!("pic_{i}.jpg"));
             data_pathes.push(pic_path.clone());
             if pic_path.exists() {

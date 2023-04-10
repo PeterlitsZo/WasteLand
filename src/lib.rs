@@ -22,7 +22,7 @@ pub struct Database {
 }
 
 impl Database {
-    const VERSION: [u8; 1] = [0u8];
+    const VERSION: &str = "waste_island.version='0.1.0'";
 
     /// Gen the waste hash from the content of data.
     pub fn gen_waste_hash(data: &[u8]) -> String {
@@ -46,8 +46,8 @@ impl Database {
     fn check_version(database_path: &PathBuf) -> Result<(), Error> {
         let mut file = fs::File::open(Self::version_path(database_path))
             .to_inner_result("open version by read-only mode")?;
-        let mut version = [0u8; 1];
-        file.read(&mut version).to_inner_result("read version")?;
+        let mut version = String::new();
+        file.read_to_string(&mut version).to_inner_result("read version")?;
         if version != Self::VERSION {
             return Err(Error::new("unsupported version"));
         }
@@ -116,9 +116,9 @@ impl Database {
     }
 
     pub fn get(&mut self, hash: &str) -> Result<Vec<u8>, Error> {
-        let offset = self.index.get(hash);
+        let offset = self.index.get(hash).to_inner_result("get offset by hash")?;
         let offset = match offset {
-            None => return Err(Error::new("not found")),
+            None => return Err(Error::new("hash not found")),
             Some(o) => o,
         };
 

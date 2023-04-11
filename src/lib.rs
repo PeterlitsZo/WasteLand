@@ -1,7 +1,10 @@
 mod indexer;
 mod error;
-mod utils;
+mod hash;
+mod btree;
+mod offset;
 
+use offset::Offset;
 use sha256::digest;
 use std::{
     fs,
@@ -12,8 +15,6 @@ use std::{
 
 use indexer::Indexer;
 use error::{Error, ToInnerResult};
-
-use crate::utils::{offset_usize_to_bytes, offset_bytes_to_usize};
 
 pub struct Database {
     path: PathBuf,
@@ -106,7 +107,7 @@ impl Database {
         let hash = Self::gen_waste_hash(data);
 
         let offset = self.data.stream_position().to_inner_result("get waste's offset")?;
-        self.data.write(&offset_usize_to_bytes(data.len()))
+        self.data.write(&Offset::new(data.len() as u64).to_bytes())
             .to_inner_result("write waste's length")?;
         self.data.write_all(data).to_inner_result("write waste's data")?;
 
@@ -122,12 +123,12 @@ impl Database {
             Some(o) => o,
         };
 
-        self.data.seek(SeekFrom::Start(offset))
+        self.data.seek(SeekFrom::Start(offset.to_u64()))
             .to_inner_result("set offset")?;
 
         let mut size = [0u8; 8];
         self.data.read_exact(&mut size).to_inner_result("read size")?;
-        let size = offset_bytes_to_usize(size);
+        let size = Offset::from_bytes(size).to_u64() as usize;
 
         let mut content = vec![0u8; size];
         self.data.read_exact(&mut content).to_inner_result("read waste")?;

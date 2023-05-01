@@ -1,5 +1,6 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, ffi::OsString};
 
+use home::home_dir;
 use waste_island::Database;
 
 pub struct PictureCache {
@@ -11,34 +12,34 @@ pub struct PictureCache {
 }
 
 impl PictureCache {
-    pub fn new(path: &PathBuf) -> PictureCache {
-        let picture_cache_path = path;
+    pub fn new() -> PictureCache {
+        let picture_cache_path = home_dir().unwrap().join("tmp/waste_land_picture_cache");
         fs::create_dir_all(&picture_cache_path).unwrap();
 
-        let mut data_pathes = vec![];
-        for i in 0..64 {
-            let pic_path = picture_cache_path.join(format!("pic_{i}.jpg"));
-            data_pathes.push(pic_path.clone());
-            if pic_path.exists() {
-                continue;
-            }
-
-            let resp =
-                reqwest::blocking::get(format!("https://cataas.com/cat/says/random {i}")).unwrap();
-            fs::write(pic_path, resp.bytes().unwrap()).unwrap();
+        if !picture_cache_path.join("SUCCESS").exists() {
+            eprintln!("Can't find file named 'SUCCESS' in the {}", picture_cache_path.display());
+            eprintln!("Put images into the directory, and touch a file named 'SUCCESS'");
+            eprintln!();
+            eprintln!("Run downloader.sh maybe can help you");
+            panic!();
         }
 
         let mut data_hashes = vec![];
+        let mut data_pathes = vec![];
         for f in fs::read_dir(&picture_cache_path).unwrap() {
             let f_path = f.unwrap().path();
+            if f_path.file_name() == Some(&OsString::from("SUCCESS")) {
+                continue;
+            }
             let content = fs::read(&f_path).unwrap();
             let hash = Database::gen_waste_hash(&content);
+            data_pathes.push(f_path);
             data_hashes.push(hash);
         }
 
         PictureCache {
-            data_hashes: data_hashes,
-            data_pathes: data_pathes,
+            data_hashes,
+            data_pathes,
         }
     }
 }

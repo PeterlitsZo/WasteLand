@@ -3,6 +3,7 @@ mod error;
 mod hash;
 mod btree;
 mod offset;
+mod utils;
 
 use offset::Offset;
 use sha256::digest;
@@ -81,7 +82,7 @@ impl Database {
 
         Ok(Database {
             data: Self::open_data(&database_path)?,
-            index: Indexer::create(&database_path)?,
+            index: Indexer::open(&database_path)?,
             path: database_path,
         })
     }
@@ -130,7 +131,8 @@ impl Database {
         self.data.read_exact(&mut size).to_inner_result("read size")?;
         let size = Offset::from_bytes(size).to_u64() as usize;
 
-        let mut content = vec![0u8; size];
+        let mut content = Vec::with_capacity(size);
+        unsafe { content.set_len(size) };
         self.data.read_exact(&mut content).to_inner_result("read waste")?;
         Ok(content)
     }

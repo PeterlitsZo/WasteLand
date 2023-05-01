@@ -1,9 +1,8 @@
-use std::mem::swap;
 use std::{path::PathBuf};
 
 use crate::btree::BTree;
 use crate::error::{Error, ToInnerResult};
-use crate::hash::{HASH_LENGTH, Hash};
+use crate::hash::Hash;
 use crate::offset::Offset;
 
 /// Indexer is a struct representing the object storage's index, which maps the
@@ -13,25 +12,17 @@ pub struct Indexer {
 }
 
 impl Indexer {
-    /// Create a new `Indexer` by path, it will:
+    /// Open a `Index` by path from a existing index data file. Or create a
+    /// new `Indexer` by path.
+    /// 
+    /// It will:
     ///
-    ///   - Create a new index file in the path.
+    ///   - Open or create a new index file in the path.
     ///   - Return `Indexer` itself.
-    ///
-    /// If there is already a index data file, use method `open` rather than
-    /// me.
-    pub fn create(path: &PathBuf) -> Result<Self, Error> {
-        let b_tree = BTree::new(&path.join("index"))
-            .to_inner_result("open index file by B-Tree format")?;
-        let mut result = Self { b_tree };
-        Ok(result)
-    }
-
-    /// Open a `Index` by path from a existing index data file.
     pub fn open(path: &PathBuf) -> Result<Self, Error> {
         let b_tree = BTree::new(&path.join("index"))
             .to_inner_result("open index file by B-Tree format")?;
-        let mut result = Self { b_tree };
+        let result = Self { b_tree };
         Ok(result)
     }
 
@@ -42,7 +33,7 @@ impl Indexer {
         let hash = Hash::from_str(hash).to_inner_result("turn to valid hash")?;
         let offset = Offset::new(offset);
 
-        self.b_tree.put(&hash, offset)
+        self.b_tree.put(&hash, &offset)
     }
 
     /// Get the offset in the data file by the hash.

@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+colored = "2.0.0"
+home = "0.5.5"
 sha256 = "1.1.2"
 
 [dev-dependencies]
@@ -16,3 +18,9 @@ rand = "0.8.5"
 [[bench]]
 name = "main"
 harness = false
+
+[profile.bench]
+debug = true
+
+[profile.test]
+debug = true

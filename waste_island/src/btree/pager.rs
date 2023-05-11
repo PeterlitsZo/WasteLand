@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
-    rc::Rc, sync::RwLock
+    sync::{RwLock, Arc}
 };
 
 use crate::error::{Error, ToInnerResult};
@@ -18,7 +18,7 @@ pub struct PagerInner {
 
 #[derive(Clone)]
 pub struct Pager {
-    inner: Rc<RwLock<PagerInner>>,
+    inner: Arc<RwLock<PagerInner>>,
 }
 
 /// From page ID to its file seek.
@@ -36,7 +36,7 @@ impl Pager {
             pages_len: (metadata.len() as usize / PAGE_SIZE),
             page_map: HashMap::new(),
         };
-        Ok(Pager { inner: Rc::new(RwLock::new(inner)) })
+        Ok(Pager { inner: Arc::new(RwLock::new(inner)) })
     }
 
     /// Get the length of the pages.

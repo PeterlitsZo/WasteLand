@@ -1,0 +1,24 @@
+[package]
+name = "waste_island"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+colored = "2.0.0"
+home = "0.5.5"
+sha256 = "1.1.2"
+
+[dev-dependencies]
+criterion = "0.3"
+reqwest = { version = "0.11", features = ["blocking"] }
+rand = "0.8.5"
+
+[[bench]]
+name = "main"
+harness = false
+
+[profile.bench]
+debug = true
+
+[profile.test]
+debug = true

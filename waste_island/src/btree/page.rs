@@ -1,4 +1,4 @@
-use std::{fmt::Debug, alloc::{alloc, Layout, dealloc}};
+use std::{fmt::Debug, alloc::{alloc, Layout, dealloc}, sync::{RwLock, Arc}};
 
 /// The size of page in the b-tree file.
 pub const PAGE_SIZE: usize = 4usize << 10; // 4 KB
@@ -23,7 +23,7 @@ struct PageInner {
 /// The implement don't use `Rc` because we need to avoid cycle. And I have no
 /// idea how to alloc a uninited memory and turn it into `Weak` as well.
 pub struct Page {
-    inner: *mut PageInner,
+    inner: Arc<RwLock<*mut PageInner>>,
 }
 
 impl PageId {
@@ -64,7 +64,7 @@ impl Page {
             ptr.ref_cnt = 1;
             ptr as *mut PageInner
         };
-        Self { inner }
+        Self { inner: Arc::new(RwLock::new(inner)) }
     }
 
     /// Get the mutable reference to the inner buffer.
@@ -107,18 +107,20 @@ impl Page {
     /// 
     /// Make sure those fields in the inner struct will not be dirty.
     unsafe fn mut_inner(&mut self) -> &mut PageInner {
-        &mut *self.inner
+        let mut inner = self.inner.write().unwrap();
+        &mut **inner
     }
 
     /// Get the unmutable reference to the inner struct.
     fn inner(&self) -> &PageInner {
-        unsafe { &*self.inner }
+        let inner = self.inner.read().unwrap();
+        unsafe { &**inner }
     }
 }
 
 impl Clone for Page {
     fn clone(&self) -> Self {
-        let mut result = Self { inner: self.inner };
+        let mut result = Self { inner: self.inner.clone() };
         unsafe { result.mut_inner().ref_cnt += 1; }
         result
     }
@@ -129,7 +131,10 @@ impl Drop for Page {
         let inner = unsafe { self.mut_inner() };
         inner.ref_cnt -= 1;
         if inner.ref_cnt == 0 {
-            unsafe { dealloc(self.inner as *mut u8, Layout::new::<PageInner>()); }
+            unsafe { dealloc(*self.inner.write().unwrap() as *mut u8, Layout::new::<PageInner>()); }
         }
     }
 }
+
+unsafe impl Send for Page {}
+unsafe impl Sync for Page {}

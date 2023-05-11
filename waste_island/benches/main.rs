@@ -31,7 +31,7 @@ fn bench_1_put_and_99_reads(c: &mut Criterion) {
             if database_path.exists() {
                 fs::remove_dir_all(&database_path).unwrap();
             }
-            let mut database = Database::create(&database_path).unwrap();
+            let mut database = Database::new(&database_path).unwrap();
 
             b.iter(|| {
                 for p in &cache.data_pathes[0..size] {
@@ -78,7 +78,7 @@ fn bench_boost_quickly_for_pictures(c: &mut Criterion) {
         fs::remove_dir_all(&database_path).unwrap();
     }
 
-    let mut database = Database::create(&database_path).unwrap();
+    let mut database = Database::new(&database_path).unwrap();
     for p in &cache.data_pathes[0..size] {
         let content = fs::read(p).unwrap();
         database.put(&content).unwrap();
@@ -89,7 +89,7 @@ fn bench_boost_quickly_for_pictures(c: &mut Criterion) {
     group.bench_function("waste_island_database", |b| {
         b.iter(|| {
             let mut database =
-                Database::open(&database_path).unwrap();
+                Database::new(&database_path).unwrap();
             let hash = cache.data_hashes[0..size].choose(&mut rand::thread_rng()).unwrap();
             database.get(hash).unwrap();
         });

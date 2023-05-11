@@ -1,4 +1,4 @@
-use std::{fs::File, path::Path, rc::Rc, sync::Mutex};
+use std::{fs::File, path::Path, rc::Rc, sync::Mutex, collections::HashMap, os::unix::prelude::OpenOptionsExt};
 
 use crate::{
     btree::{
@@ -19,6 +19,7 @@ use super::{
 
 pub struct BTree {
     pager: Pager,
+    cache: HashMap<Hash, Offset>,
     head_node: HeadNode,
 }
 
@@ -70,7 +71,7 @@ impl BTree {
             return Err(Error::new("the head node is not valid"));
         }
 
-        Ok(Self { pager, head_node })
+        Ok(Self { pager, head_node, cache: HashMap::new() })
     }
 
     pub fn put(&mut self, key: &Hash, value: &Offset) -> Result<(), Error> {
@@ -169,10 +170,16 @@ impl BTree {
                 inner_put(self, parent_page, key, value)?;
             }
         };
+
+        self.cache.insert(*key, *value);
         Ok(())
     }
 
     pub fn get(&mut self, key: &Hash) -> Result<Option<Offset>, Error> {
+        if let Some(v) = self.cache.get(key) {
+            return Ok(Some(*v))
+        }
+
         let root_page_id = self.head_node.hdr().root_node_page_id;
         let root_page = self.pager.get_page(root_page_id)?;
 

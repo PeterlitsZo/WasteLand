@@ -42,4 +42,8 @@ impl Indexer {
 
         self.b_tree.get(&hash)
     }
+
+    pub fn list(&mut self) -> Result<Vec<String>, Error> {
+        Ok(self.b_tree.list()?.iter().map(|hs| hs.to_string()).collect())
+    }
 }

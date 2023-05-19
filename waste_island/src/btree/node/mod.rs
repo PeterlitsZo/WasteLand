@@ -21,7 +21,7 @@ pub fn get_node_type(page: &Page) -> NodeType {
         1 => NodeType::Head,
         2 => NodeType::Leaf,
         3 => NodeType::Internal,
-        _ => panic!("unexcepted type")
+        _ => panic!("unexcepted type: {}", page.buf()[0])
     }
 }
 

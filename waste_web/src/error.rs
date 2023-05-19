@@ -5,6 +5,12 @@ pub struct Error {
     msg: String,
 }
 
+impl Error {
+    pub fn new(msg: String) -> Self {
+        return Self { msg }
+    }
+}
+
 impl From<waste_island::Error> for Error {
     fn from(value: waste_island::Error) -> Self {
         Self { msg: value.to_string() }

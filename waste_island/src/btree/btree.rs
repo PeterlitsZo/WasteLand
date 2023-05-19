@@ -1,11 +1,12 @@
-use std::{fs::File, path::Path, rc::Rc, sync::Mutex, collections::HashMap, os::unix::prelude::OpenOptionsExt};
+use std::{
+    collections::HashMap, fs::File, path::Path,
+};
 
 use crate::{
     btree::{
         node::{get_node_type, HeadNode, LeafNode},
         page::Page,
     },
-    debug,
     error::{Error, ToInnerResult},
     hash::Hash,
     offset::Offset,
@@ -26,6 +27,7 @@ pub struct BTree {
 impl BTree {
     const HEAD_PAGE_ID: PageId = PageId::new(0);
 
+    /// Open or create a new BTree file.
     pub fn new<P>(file_name: P) -> Result<BTree, Error>
     where
         P: AsRef<Path>,
@@ -71,14 +73,54 @@ impl BTree {
             return Err(Error::new("the head node is not valid"));
         }
 
-        Ok(Self { pager, head_node, cache: HashMap::new() })
+        Ok(Self {
+            pager,
+            head_node,
+            cache: HashMap::new(),
+        })
     }
 
+    /// List all records' keys.
+    pub fn list(&mut self) -> Result<Vec<Hash>, Error> {
+        fn inner_list(slf: &mut BTree, res: &mut Vec<Hash>, root_page: &Page) -> Result<(), Error> {
+            match get_node_type(root_page) {
+                NodeType::Leaf => {
+                    let leaf_node = unsafe { LeafNode::new_unchecked(root_page.clone()) };
+                    for r in leaf_node.into_iter() {
+                        res.push(r.key);
+                    }
+                }
+                NodeType::Internal => {
+                    let mut internal_node = unsafe { InternalNode::new_unchecked(root_page.clone()) };
+                    for r in internal_node.into_iter() {
+                        let page = &slf.pager.get_page(r.value)?;
+                        inner_list(slf, res, page)?;
+                    }
+                    let rightest_page_id = unsafe { internal_node.hdr_mut().rightest_page_id };
+                    let page = &slf.pager.get_page(rightest_page_id)?;
+                    inner_list(slf, res, page)?;
+                }
+                _ => panic!("unexpected node type")
+            };
+            Ok(())
+        }
+
+        let root_page_id = self.head_node.hdr().root_node_page_id;
+        let root_page = self.pager.get_page(root_page_id)?;
+        let mut res: Vec<Hash> = vec![];
+        inner_list(self, &mut res, &root_page)?;
+        Ok(res)
+    }
+
+    /// Put a new record (key, value).
     pub fn put(&mut self, key: &Hash, value: &Offset) -> Result<(), Error> {
         let root_page_id = self.head_node.hdr().root_node_page_id;
         let root_page = self.pager.get_page(root_page_id)?;
 
-        enum InnerPut { SplitMe(Hash, PageId), Alright }
+        enum InnerPut {
+            SplitMe(Hash, PageId),
+            Alright,
+        }
         fn inner_put(
             slf: &mut BTree,
             page: Page,
@@ -100,9 +142,10 @@ impl BTree {
                         slf.pager.sync_page(unsafe { new_node.mut_page() })?;
                         slf.pager.sync_page(unsafe { node.mut_page() })?;
 
-                        return Ok(
-                            InnerPut::SplitMe(unsafe { *node.rightest_key() }, new_node.page_id())
-                        );
+                        return Ok(InnerPut::SplitMe(
+                            unsafe { *node.rightest_key() },
+                            new_node.page_id(),
+                        ));
                     }
 
                     unsafe { node.put(key, value) };
@@ -133,17 +176,19 @@ impl BTree {
                     let (origin_key, next_page_id) = node.get(key);
                     let next_page = slf.pager.get_page(next_page_id)?;
                     match inner_put(slf, next_page, key, value)? {
-                        InnerPut::Alright => { return Ok(InnerPut::Alright); }
+                        InnerPut::Alright => {
+                            return Ok(InnerPut::Alright);
+                        }
                         InnerPut::SplitMe(new_key, new_value) => {
                             match origin_key {
                                 Some(ori_k) => {
                                     unsafe { node.put(&ori_k, &new_value) };
                                     unsafe { node.put(&new_key, &next_page_id) };
-                                },
+                                }
                                 None => {
                                     unsafe { node.hdr_mut().rightest_page_id = new_value };
                                     unsafe { node.put(&new_key, &next_page_id) };
-                                },
+                                }
                             };
                             node.make_dirty();
                             let node_page = unsafe { node.mut_page() };
@@ -164,8 +209,14 @@ impl BTree {
                 unsafe { parent_node.init(new_value) };
                 unsafe { parent_node.put(&new_key, &root_page_id) }
                 unsafe {
-                    self.head_node.mut_hdr().root_node_page_id =
-                        parent_node.page_id();
+                    self.head_node.mut_hdr().root_node_page_id = parent_node.page_id();
+                }
+
+                self.head_node.make_dirty();
+                parent_node.make_dirty();
+                unsafe {
+                    self.pager.sync_page(self.head_node.mut_page()).unwrap();
+                    self.pager.sync_page(parent_node.mut_page()).unwrap();
                 }
                 inner_put(self, parent_page, key, value)?;
             }
@@ -175,9 +226,10 @@ impl BTree {
         Ok(())
     }
 
+    /// Get record's value by the record's key.
     pub fn get(&mut self, key: &Hash) -> Result<Option<Offset>, Error> {
         if let Some(v) = self.cache.get(key) {
-            return Ok(Some(*v))
+            return Ok(Some(*v));
         }
 
         let root_page_id = self.head_node.hdr().root_node_page_id;
@@ -244,34 +296,42 @@ mod tests {
     }
 
     #[test]
+    fn it_works_even_after_reopen() {
+        let btree_path = cleanup_and_create_new_btree_file("it-works-even-after-reopen.btree");
+
+        {
+            let mut btree = BTree::new(&btree_path).unwrap();
+            for i in 0..0xff {
+                btree.put(&Hash::from_bytes([i as u8; HASH_SIZE]), &Offset::new(i)).unwrap();
+            }
+        }
+        for i in 0..0xff {
+            let mut btree = BTree::new(&btree_path).unwrap();
+            btree.get(&Hash::from_bytes([i as u8; HASH_SIZE])).unwrap();
+        }
+    }
+
+    #[test]
     fn a_simple_tree_with_internal_node() {
         let btree_path =
             cleanup_and_create_new_btree_file("a-simple-tree-with-internal-node.btree");
 
         let mut btree = BTree::new(btree_path).unwrap();
         let mut mem_map = HashMap::new();
+        let mut keys = vec![];
         for i in 0..0xff {
-            dbg!(i);
             let key = Hash::from_bytes([i; HASH_SIZE]);
+            keys.push(key);
             let value = Offset::new(i as u64);
-            if i == 99 {
-                eprintln!("在这停顿！")
-            }
             btree.put(&key, &value).unwrap();
             mem_map.insert(key, value);
         }
 
-        for (i, k) in mem_map.keys().enumerate() {
-            dbg!(i);
-            let v = &btree.get(k).unwrap();
-            match v {
-                Some(v) => { assert_eq!(v, mem_map.get(k).unwrap()) },
-                None => {
-                    &btree.get(k).unwrap();
-                }
-            }
+        for k in mem_map.keys() {
             assert_eq!(&btree.get(k).unwrap().unwrap(), mem_map.get(k).unwrap());
         }
+
+        assert_eq!(btree.list().unwrap(), keys);
     }
 
     #[test]

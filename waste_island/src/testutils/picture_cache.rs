@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf, ffi::OsString};
 
 use home::home_dir;
-use waste_island::Database;
+use crate::Database;
 
 pub struct PictureCache {
     /// Cache data (yes, it is a picture) files' hashes.
@@ -12,7 +12,7 @@ pub struct PictureCache {
 }
 
 impl PictureCache {
-    pub fn new() -> PictureCache {
+    pub fn new(size: usize) -> PictureCache {
         let picture_cache_path = home_dir().unwrap().join("tmp/waste_land_picture_cache");
         fs::create_dir_all(&picture_cache_path).unwrap();
 
@@ -35,8 +35,13 @@ impl PictureCache {
             let hash = Database::gen_waste_hash(&content);
             data_pathes.push(f_path);
             data_hashes.push(hash);
+
+            if data_hashes.len() == size {
+                break;
+            }
         }
 
+        assert!(size == data_hashes.len());
         PictureCache {
             data_hashes,
             data_pathes,

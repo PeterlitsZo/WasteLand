@@ -1716,6 +1716,7 @@ dependencies = [
  "axum",
  "http-body-util",
  "hyper",
+ "serde_json",
  "tokio",
  "tower-http",
  "waste_island",

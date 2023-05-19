@@ -6,6 +6,7 @@ use std::{
 };
 
 use axum::{extract::Path, http::StatusCode, response::IntoResponse, http::status::InvalidStatusCode};
+use serde_json::json;
 
 use crate::error::Error;
 
@@ -21,16 +22,29 @@ pub struct ServerResponse {
 }
 
 impl Server {
-    pub fn new(database_path: &str, static_path: &str) -> Result<Self, Error> {
+    pub fn new(database_path: &str) -> Result<Self, Error> {
         let database = waste_island::Database::new(database_path)?;
         Ok(Self {
             database: Arc::new(Mutex::new(database)),
         })
     }
 
+    pub fn list_wastes(&mut self) -> Result<ServerResponse, Error> {
+        let mut database = self.database.lock().unwrap();
+        let result = database.list()?;
+        Ok(ServerResponse {
+            status: StatusCode::OK,
+            content_type: "application/json".to_string(),
+            body: json!({ "data": result }).to_string().as_bytes().to_vec(),
+        })
+    }
+
     pub fn get_waste(&mut self, waste_key: String) -> Result<ServerResponse, Error> {
         let mut database = self.database.lock().unwrap();
         let res = database.get(&waste_key)?;
+        if res.len() == 0 {
+            return Err(Error::new(format!("length = 0, when key = {}", waste_key)));
+        }
         let content_type_len = &res[0];
         let content_type = &res[1..1 + *content_type_len as usize];
         let body = &res[1 + *content_type_len as usize..];

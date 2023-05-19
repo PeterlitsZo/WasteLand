@@ -10,9 +10,12 @@ const HEAD_NODE_MAGIC: &'static str = "skogkatt.org/WasteIsland/B-Plus-Tree";
 
 #[repr(C)]
 pub struct HeadNodeHdr {
+    // node_type + version + magic = 64 bytes
     node_type: NodeType,
     version: u8,
-    magic: [u8; HEAD_NODE_MAGIC.len()],
+    magic: [u8; 62],
+
+    // 4 bytes
     pub root_node_page_id: PageId,
 }
 
@@ -27,6 +30,9 @@ impl HeadNode {
         Self(page)
     }
 
+    /// # Safety
+    /// 
+    /// Remember to make it dirty and sync it if you change it.
     pub unsafe fn mut_hdr(&mut self) -> &mut HeadNodeHdr {
         unsafe { &mut *(self.0.mut_buf() as *mut [u8] as *mut HeadNodeHdr) }
     }
@@ -39,7 +45,7 @@ impl HeadNode {
     /// 
     /// # Safety
     /// 
-    /// Do not touch the page unless you remember to sync it.
+    /// Do not touch the page unless you remember to make it dirty and sync it.
     pub unsafe fn mut_page(&mut self) -> &mut Page {
         &mut self.0
     }
@@ -54,7 +60,9 @@ impl HeadNode {
         let hdr = self.mut_hdr();
         hdr.node_type = NodeType::Head;
         hdr.version = 0;
-        hdr.magic = HEAD_NODE_MAGIC.as_bytes().try_into().unwrap();
+        let mut magic = vec![0u8; 62];
+        magic[0..HEAD_NODE_MAGIC.len()].copy_from_slice(HEAD_NODE_MAGIC.as_bytes());
+        hdr.magic = magic.as_slice().try_into().unwrap();
         hdr.root_node_page_id = root_node_page_id;
     }
 
@@ -63,9 +71,23 @@ impl HeadNode {
     pub fn check(&self) -> bool {
         let hdr = self.hdr();
 
+        let magic_matched = (|| {
+            for i in 0..HEAD_NODE_MAGIC.len() {
+                if hdr.magic[i] != HEAD_NODE_MAGIC.as_bytes()[i] {
+                    return false
+                }
+            }
+            for i in HEAD_NODE_MAGIC.len()..62 {
+                if hdr.magic[i] != 0u8 {
+                    return false
+                }
+            }
+            return true
+        })();
+
         hdr.node_type == NodeType::Head
             && hdr.version == 0
-            && hdr.magic == HEAD_NODE_MAGIC.as_bytes()
+            && magic_matched
     }
 
     /// Make self is dirty.

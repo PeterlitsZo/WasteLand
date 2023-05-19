@@ -1,5 +1,5 @@
 [workspace]
 members = [
     "waste_island",
-    "waste_web"
+    "waste_web",
 ]

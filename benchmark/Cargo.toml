@@ -1,0 +1,26 @@
+[package]
+name = "benchmark"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+waste_island = { path = "../waste_island" }
+criterion = { version = "0.4", features = ["html_reports"] }
+reqwest = { version = "0.11", features = ["blocking"] }
+rand = "0.8.5"
+rocksdb = "0.21.0"
+sqlite = "0.30.4"
+home = "0.5.5"
+
+[[bench]]
+name = "main"
+harness = false
+
+[profile.bench]
+debug = true
+
+[profile.test]
+debug = true
+

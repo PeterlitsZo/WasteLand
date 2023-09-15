@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf, ffi::OsString};
 
 use home::home_dir;
-use crate::Database;
+use waste_island::Database;
 
 pub struct PictureCache {
     /// Cache data (yes, it is a picture) files' hashes.

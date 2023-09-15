@@ -1,15 +1,18 @@
 use std::{
-    path::{PathBuf, Path}, fs, io::{Seek, Write, SeekFrom, Read},
+    path::{PathBuf, Path}, fs, io::{Seek, Write, SeekFrom, Read}, num::NonZeroUsize,
 };
 
+use lru::LruCache;
 use sha256::digest;
 
-use crate::{indexer::Indexer, Error, error::ToInnerResult, offset::Offset, testutils::PictureCache};
+use crate::{indexer::Indexer, Error, error::ToInnerResult, offset::Offset};
 
 pub struct Database {
     path: PathBuf,
     data: fs::File,
     indexer: Indexer,
+    len: usize,
+    cache: LruCache<String, Vec<u8>>,
 }
 
 impl Database {
@@ -46,6 +49,8 @@ impl Database {
             data: Self::open_data(&database_path).to_inner_result("open data file")?,
             indexer: Indexer::open(&database_path).to_inner_result("open indexer")?,
             path: database_path,
+            len: 0,
+            cache: LruCache::new(NonZeroUsize::new(16).unwrap()),
         })
     }
 
@@ -56,17 +61,27 @@ impl Database {
     pub fn put(&mut self, data: &[u8]) -> Result<String, Error> {
         let hash = Self::gen_waste_hash(data);
 
-        let offset = self.data.stream_position().to_inner_result("get waste's offset")?;
+        let offset = self.data.seek(SeekFrom::End(0)).to_inner_result("set offset")?;
         self.data.write(&Offset::new(data.len() as u64).to_bytes())
             .to_inner_result("write waste's length")?;
         self.data.write_all(data).to_inner_result("write waste's data")?;
 
         self.indexer.put(&hash, offset)?;
+        self.len += 1;
 
+        if data.len() < 256 * 1024 { // 256KB.
+            self.cache.put(hash.clone(), Vec::from(data));
+            let new_cache_size = NonZeroUsize::new(self.len / 4 + 16).unwrap();
+            self.cache.resize(new_cache_size);
+        }
         Ok(hash)
     }
 
     pub fn get(&mut self, hash: &str) -> Result<Vec<u8>, Error> {
+        if let Some(result) = self.cache.get(hash) {
+            return Ok(result.clone());
+        }
+
         let offset = self.indexer.get(hash).to_inner_result("get offset by hash")?;
         let offset = match offset {
             None => return Err(Error::new("hash not found")),
@@ -97,6 +112,7 @@ impl Database {
 mod tests {
     use std::io::ErrorKind;
     use rand::{self, seq::SliceRandom};
+    use benchmark::picture_cache::PictureCache;
 
     use super::*;
 

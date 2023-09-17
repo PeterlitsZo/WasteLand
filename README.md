@@ -1,5 +1,30 @@
 # WasteLand
 
+## WasteWeb
+
+WasteWeb is a subproject to add a Web UI for WasteLand.
+
+We use React to build our UI and we also write some code to support some HTTP APIs.
+
+### How to run?
+
+At first you should to build `dist` folder:
+
+```shell
+$ pwd
+<the-path-of-project>/waste_web/frontend_ui
+$ pnpm i
+$ pnpm run build
+```
+
+Then what you should do is just run the server:
+
+```shell
+$ pwd
+<the-path-of-project>/waste_web/frontend_ui
+$ cargo run
+```
+
 ## Bench test
 
 ### WasteIsland

@@ -22,7 +22,7 @@ use error::Error;
 async fn main() -> Result<(), Error> {
     let server = Server::new("./.waste_web_data/")?;
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3514));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3514));
 
     let cors = CorsLayer::new()
         .allow_methods(vec![Method::GET, Method::POST])
@@ -36,6 +36,7 @@ async fn main() -> Result<(), Error> {
         .with_state(server)
         .layer(cors);
 
+    println!("Serve at {}...", addr);
     axum::Server::bind(&addr)
         .serve(router.into_make_service())
         .await

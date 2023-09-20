@@ -25,6 +25,13 @@ $ pwd
 $ cargo run
 ```
 
+Now we also support run with Docker:
+
+```shell
+$ docker build -t waste_land_web .
+$ docker run -d -p 3514:3514 -v ./data/:/app/.waste_web_data/ waste_land_web
+```
+
 ## Bench test
 
 ### WasteIsland
@@ -34,3 +41,4 @@ You should use `./benchmark/src/picture_cache/downloader.sh` to download picture
 ```shell
 $ cargo bench
 ```
+
